@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notifications / WebSocket</title>
+    <!-- Add this in the <head> or before your own <script> -->
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        form {
+            margin-bottom: 20px;
+        }
+
+        input[type="text"] {
+            padding: 8px;
+            width: 250px;
+        }
+
+        button {
+            padding: 8px 12px;
+        }
+
+        ul {
+            list-style-type: disc;
+            padding-left: 20px;
+        }
+
+        li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+
+        <h2>Submit a notification</h2>
+
+        <form id="itemForm">
+            <input type="text" id="itemInput" placeholder="Enter something..." required />
+            <button type="button" onclick="submitNotification()">Add</button>
+        </form>
+
+
+        <h3>Notifications:</h3>
+        <ul id="itemList"></ul>
+    </div>
+    <div>
+        <h2>Counter App:</h2>
+        <button type="button" onclick="startCounter()">Start</button>
+        <button type="button" onclick="stopCounter()">Stop</button>
+        <p id="currentCount"></p>
+    </div>
+
+    <script>
+        let stompClient = null;
+        let count = 0;
+        let intervalId = null;  // Store the interval ID so we can clear it later
+
+        // This function connects to the WebSocket server only once
+        // Connects the server & Register listeners of each Broadcast
+        function connectWS() {
+            const socket = new SockJS('http://localhost:8080/app/ws/connect');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, function (frame) {
+                console.log("WebSocket connected: ", frame);
+
+                // Subscribe to the counter topic
+                // Only subscribing doesn't mean it starts populating data
+                // it listens to changes only. whenever they come it starts 
+                // executing.
+                stompClient.subscribe('/topic/counter', function (message) {
+                    const newCount = message.body; // Assuming message.body contains the counter value
+                    updateCounter(newCount);
+                });
+
+                // Subscribe to the notifications topic
+                // Same as above, we register channels and listeners once the connection
+                // is established, if fails we reconnect.
+                stompClient.subscribe('/topic/notifications', function (message) {
+                    console.log("Received message from WebSocket: ", message);
+                    displayNotifications(message.body);
+                });
+
+            }, function (error) {
+                console.error("WebSocket connection error: ", error);
+            });
+        }
+
+        // Start sending counter value continuously
+        function startCounter() {
+            // Send the initial counter value when the user starts the counter
+            if (stompClient && stompClient.connected) {
+                console.log("Counter started: ", count);
+                stompClient.send("/app/counter", {}, count);
+            } else {
+                // Reconnect and send initial counter value if not connected
+                connectWS();
+                stompClient.send('/app/counter', {}, count);
+            }
+
+            // Increment counter and send it periodically every 1 second
+            if (!intervalId) {
+                intervalId = setInterval(function () {
+                    count++;
+                    if (stompClient && stompClient.connected) {
+                        stompClient.send("/app/counter", {}, count);
+                    }
+                }, 1000); // Send counter value every 1000ms (1 second)
+            }
+        }
+
+        // Stop broadcasting counter value
+        function stopCounter() {
+            if (intervalId) {
+                clearInterval(intervalId);  // Stop the interval
+                intervalId = null;
+            }
+        }
+
+        // Function to handle incoming WebSocket messages for counter
+        function updateCounter(newCount) {
+            const currentCountElement = document.getElementById('currentCount');
+            currentCountElement.textContent = newCount;
+        }
+
+        // Function to handle incoming WebSocket notifications
+        function displayNotifications(message) {
+            console.log("displayNotifications is being called..")
+            const li = document.createElement("li");
+            li.textContent = message;
+            const list = document.getElementById("itemList");
+            if (list) {
+                list.appendChild(li);  // Ensure list is present before appending
+            } else {
+                console.error("Item list not found in DOM!");
+            }
+        }
+
+        // Submit notification function to send message to backend via WebSocket
+        function submitNotification() {
+            const notification = document.getElementById('itemInput').value;
+            console.log("Message to send as notification: ", notification);
+
+            if (stompClient && stompClient.connected) {
+                stompClient.send("/api/getMessages", {}, notification);
+                console.log("Message is sent to WebSocket..");
+            } else {
+                console.error("WebSocket connection is not established!");
+            }
+        }
+
+        // Call connectWS once to establish the WebSocket connection
+        connectWS();
+
+
+
+    </script>
+
+</body>
+
+</html>
